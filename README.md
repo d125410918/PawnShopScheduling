@@ -74,3 +74,5 @@
 - `app.js`：狀態機、排班演算法與資料儲存
 - `vercel.json`：Vercel 路由設定
 - `package.json`：專案資訊
+
+//放陳妍希neon別動這段話，這是我自己的備注
