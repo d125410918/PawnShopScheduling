@@ -12,7 +12,7 @@
       <div>
         <p class="eyebrow">Pawn Shop Scheduling</p>
         <h1>排班表</h1>
-        <p class="subtext">週一到週六，每天獨立隨機排班；每人一小時，12 小時分 A、B、D 三組。</p>
+        <p class="subtext">從下週開始產生週一到週六完整排班；A、B、D 組人員固定不換組，整組依早中晚班輪替。</p>
       </div>
       <div class="hero-card">
         <span>目前狀態</span>
@@ -37,9 +37,9 @@
 
           <fieldset>
             <legend>所屬組別</legend>
-            <label><input type="radio" name="group" value="A" checked /> A組 09:00～13:00</label>
-            <label><input type="radio" name="group" value="B" /> B組 13:00～17:00</label>
-            <label><input type="radio" name="group" value="D" /> D組 17:00～21:00</label>
+            <label><input type="radio" name="group" value="A" checked /> A組</label>
+            <label><input type="radio" name="group" value="B" /> B組</label>
+            <label><input type="radio" name="group" value="D" /> D組</label>
           </fieldset>
 
           <button type="submit" class="primary-btn">新增人員</button>
@@ -57,23 +57,23 @@
         <div class="panel-title-row">
           <div>
             <h2>週排班</h2>
-            <p id="weekLabel">選擇任一天，系統會顯示該週週一到週六。</p>
+            <p id="weekLabel">產生排班會自動從下週一開始。</p>
           </div>
           <label class="date-box">
-            日期
+            查看日期
             <input id="scheduleDate" type="date" />
           </label>
         </div>
 
         <div class="rules-card">
           <strong>站班（每小時輪流）</strong>
-          <p>每個時段只從該組啟用人員中抽選。最新加入前 3 名人員有較高權重。組內人員足夠時，同一天盡量不重複。</p>
+          <p>第一週 A組早班、B組中班、D組晚班；後續每週整組往下一班輪替。獨立查看組別時，只顯示該組本週輪到的時段。</p>
         </div>
 
         <div class="schedule-actions">
           <button id="prevWeekButton" type="button">上一週</button>
           <button id="nextWeekButton" type="button">下一週</button>
-          <button id="generateButton" type="button" class="primary-btn">產生本週排班</button>
+          <button id="generateButton" type="button" class="primary-btn">產生下週排班</button>
           <button id="copyButton" type="button">複製文字</button>
           <button id="exportButton" type="button">下載 CSV</button>
           <button id="clearScheduleButton" type="button" class="danger-text">清除本週排班</button>
