@@ -8,11 +8,11 @@
 </head>
 <body>
   <main class="app-shell">
-    <header class="hero">
+    <header class="hero compact-card">
       <div>
         <p class="eyebrow">Pawn Shop Scheduling</p>
         <h1>排班表</h1>
-        <p class="subtext">從下週開始產生週一到週六完整排班；A、B、D 組人員固定不換組，整組依早中晚班輪替。</p>
+        <p class="subtext">產生目前查看週的完整班表；A、B、D 組人員固定不換組，整組依早中晚班輪替。</p>
       </div>
       <div class="hero-card">
         <span>目前狀態</span>
@@ -20,12 +20,12 @@
       </div>
     </header>
 
-    <section class="layout-grid">
-      <section class="panel">
-        <div class="panel-title-row">
+    <section class="top-grid">
+      <section class="panel people-panel compact-card">
+        <div class="panel-title-row compact-title">
           <div>
             <h2>人員管理</h2>
-            <p>新增人員時請指定組別；清單可停用、啟用或刪除。</p>
+            <p>可依組別查看，並在同組內上移、下移調整輪調順序。</p>
           </div>
         </div>
 
@@ -45,7 +45,14 @@
           <button type="submit" class="primary-btn">新增人員</button>
         </form>
 
-        <div class="toolbar">
+        <div class="filter-bar small-filter" aria-label="人員組別篩選">
+          <button type="button" class="people-filter-btn active" data-people-filter="ALL">所有人</button>
+          <button type="button" class="people-filter-btn" data-people-filter="A">A組</button>
+          <button type="button" class="people-filter-btn" data-people-filter="B">B組</button>
+          <button type="button" class="people-filter-btn" data-people-filter="D">D組</button>
+        </div>
+
+        <div class="toolbar compact-toolbar">
           <button id="seedButton" type="button">建立範例人員</button>
           <button id="clearPeopleButton" type="button" class="danger-text">清除人員</button>
         </div>
@@ -53,11 +60,11 @@
         <div id="peopleList" class="people-list"></div>
       </section>
 
-      <section class="panel schedule-panel">
-        <div class="panel-title-row">
+      <section class="panel control-panel compact-card">
+        <div class="panel-title-row compact-title">
           <div>
-            <h2>週排班</h2>
-            <p id="weekLabel">產生排班會自動從下週一開始。</p>
+            <h2>班表控制</h2>
+            <p id="weekLabel">選擇日期後，會顯示該週週一到週六。</p>
           </div>
           <label class="date-box">
             查看日期
@@ -65,21 +72,21 @@
           </label>
         </div>
 
-        <div class="rules-card">
-          <strong>站班（每小時輪流）</strong>
-          <p>第一週 A組早班、B組中班、D組晚班；後續每週整組往下一班輪替。獨立查看組別時，只顯示該組本週輪到的時段。</p>
+        <div class="rules-card compact-rules">
+          <strong>站班規則</strong>
+          <p>每週整組往下一班輪替。若本週已有班表，重新產生前會先確認；在單組模式時只重新產生該組。</p>
         </div>
 
-        <div class="schedule-actions">
+        <div class="schedule-actions compact-toolbar">
           <button id="prevWeekButton" type="button">上一週</button>
           <button id="nextWeekButton" type="button">下一週</button>
-          <button id="generateButton" type="button" class="primary-btn">產生下週排班</button>
+          <button id="generateButton" type="button" class="primary-btn">產生本週排班</button>
           <button id="copyButton" type="button">複製文字</button>
           <button id="exportButton" type="button">下載 CSV</button>
           <button id="clearScheduleButton" type="button" class="danger-text">清除本週排班</button>
         </div>
 
-        <div class="filter-bar" aria-label="組別篩選">
+        <div class="filter-bar" aria-label="班表組別篩選">
           <button type="button" class="filter-btn active" data-filter="ALL">所有人</button>
           <button type="button" class="filter-btn" data-filter="A">A組</button>
           <button type="button" class="filter-btn" data-filter="B">B組</button>
@@ -87,8 +94,11 @@
         </div>
 
         <div id="messageBox" class="message-box" role="status"></div>
-        <div id="scheduleTable" class="schedule-table"></div>
       </section>
+    </section>
+
+    <section class="panel schedule-panel schedule-fixed">
+      <div id="scheduleTable" class="schedule-table"></div>
     </section>
   </main>
 
