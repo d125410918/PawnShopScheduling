@@ -12,7 +12,7 @@
       <div>
         <p class="eyebrow">Pawn Shop Scheduling</p>
         <h1>排班表</h1>
-        <p class="subtext">產生目前查看週的完整班表；A、B、D 組人員固定不換組，整組依早中晚班輪替。</p>
+        <p class="subtext">上半部壓縮控制，下半部固定顯示完整 09:00～21:00 班表。可點班表人員直接更換該時段值班人員。</p>
       </div>
       <div class="hero-card">
         <span>目前狀態</span>
@@ -25,7 +25,7 @@
         <div class="panel-title-row compact-title">
           <div>
             <h2>人員管理</h2>
-            <p>可依組別查看，並在同組內上移、下移調整輪調順序。</p>
+            <p>人員固定在所屬組別，可依組別查看。</p>
           </div>
         </div>
 
@@ -72,9 +72,12 @@
           </label>
         </div>
 
-        <div class="rules-card compact-rules">
-          <strong>站班規則</strong>
-          <p>每週整組往下一班輪替。若本週已有班表，重新產生前會先確認；在單組模式時只重新產生該組。</p>
+        <div class="rotation-strip">
+          <div>
+            <strong>整組輪調</strong>
+            <span id="rotationLabel">A → B → D</span>
+          </div>
+          <button id="rotateGroupButton" type="button">整組輪調一次</button>
         </div>
 
         <div class="schedule-actions compact-toolbar">
