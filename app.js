@@ -1,14 +1,20 @@
-const STORE_KEY = "pawnshop-scheduling-v2";
-const OLD_STORE_KEY = "pawnshop-scheduling-v1";
+const STORE_KEY = "pawnshop-scheduling-v3";
+const OLD_STORE_KEYS = ["pawnshop-scheduling-v2", "pawnshop-scheduling-v1"];
 
 const GROUPS = [
-  { id: "A", name: "A組", start: "09:00", end: "13:00", hours: ["09:00", "10:00", "11:00", "12:00"] },
-  { id: "B", name: "B組", start: "13:00", end: "17:00", hours: ["13:00", "14:00", "15:00", "16:00"] },
-  { id: "D", name: "D組", start: "17:00", end: "21:00", hours: ["17:00", "18:00", "19:00", "20:00"] }
+  { id: "A", name: "A組" },
+  { id: "B", name: "B組" },
+  { id: "D", name: "D組" }
+];
+
+const SHIFTS = [
+  { id: "EARLY", name: "早班", start: "09:00", end: "13:00", hours: ["09:00", "10:00", "11:00", "12:00"] },
+  { id: "MID", name: "中班", start: "13:00", end: "17:00", hours: ["13:00", "14:00", "15:00", "16:00"] },
+  { id: "LATE", name: "晚班", start: "17:00", end: "21:00", hours: ["17:00", "18:00", "19:00", "20:00"] }
 ];
 
 const DAYS = ["一", "二", "三", "四", "五", "六"];
-const ALL_HOURS = GROUPS.flatMap(g => g.hours);
+const ALL_HOURS = SHIFTS.flatMap(s => s.hours);
 
 const State = Object.freeze({
   Idle: "Idle",
@@ -54,10 +60,11 @@ function init() {
     filterButtons: [...document.querySelectorAll(".filter-btn")]
   };
 
-  app.els.scheduleDate.value = todayText();
+  app.els.scheduleDate.value = nextWeekMondayText();
+  ensureRotationBase();
 
   app.els.personForm.addEventListener("submit", onAddPerson);
-  app.els.generateButton.addEventListener("click", onGenerateWeekSchedule);
+  app.els.generateButton.addEventListener("click", onGenerateNextWeekSchedule);
   app.els.copyButton.addEventListener("click", onCopySchedule);
   app.els.exportButton.addEventListener("click", onExportCsv);
   app.els.clearScheduleButton.addEventListener("click", onClearWeekSchedule);
@@ -107,23 +114,27 @@ function onAddPerson(event) {
   app.transition(State.Idle);
 }
 
-function onGenerateWeekSchedule() {
+function onGenerateNextWeekSchedule() {
   app.transition(State.GeneratingSchedule);
   try {
-    weekDates().forEach(date => {
-      app.data.schedules[date] = generateDaySchedule(date);
+    ensureRotationBase();
+    const targetMonday = nextWeekMondayText();
+    app.els.scheduleDate.value = targetMonday;
+    weekDatesFrom(targetMonday).forEach(date => {
+      app.data.schedules[date] = generateDaySchedule(date, targetMonday);
     });
     saveData();
-    setMessage("已完成本週週一到週六排班。");
+    setMessage(`已完成下週排班：${targetMonday}～${weekDatesFrom(targetMonday)[5]}。`);
     app.transition(State.ViewingSchedule);
   } catch (err) {
     app.transition(State.Error, err.message);
   }
 }
 
-function generateDaySchedule(date) {
+function generateDaySchedule(date, weekStartDate) {
   const slots = [];
   for (const group of GROUPS) {
+    const shift = shiftForGroup(group.id, weekStartDate);
     const members = app.data.people
       .filter(p => normalizeGroupId(p.groupId) === group.id && p.active)
       .sort((a, b) => b.joinOrder - a.joinOrder);
@@ -131,8 +142,8 @@ function generateDaySchedule(date) {
     if (members.length === 0) throw new Error(`${group.name} 沒有啟用人員，無法排班。`);
 
     const used = new Set();
-    group.hours.forEach((hour, index) => {
-      const pool = members.length >= group.hours.length ? members.filter(p => !used.has(p.id)) : members.slice();
+    shift.hours.forEach((hour, index) => {
+      const pool = members.length >= shift.hours.length ? members.filter(p => !used.has(p.id)) : members.slice();
       const selected = weightedPick(pool.length ? pool : members);
       used.add(selected.id);
       slots.push({
@@ -142,13 +153,16 @@ function generateDaySchedule(date) {
         hourText: `${hour}～${addOneHour(hour)}`,
         groupId: group.id,
         groupName: group.name,
+        shiftId: shift.id,
+        shiftName: shift.name,
+        shiftText: `${shift.name} ${shift.start}～${shift.end}`,
         personId: selected.id,
         personName: selected.name,
         order: index + 1
       });
     });
   }
-  return slots;
+  return slots.sort((a, b) => a.hour.localeCompare(b.hour));
 }
 
 function weightedPick(pool) {
@@ -170,29 +184,31 @@ function weightedPick(pool) {
 }
 
 function onCopySchedule() {
-  const slots = getWeekSlots();
+  const slots = getVisibleWeekSlots();
   if (!slots.length) {
-    setMessage("本週沒有排班可複製。", true);
+    setMessage("目前畫面沒有排班可複製。", true);
     return;
   }
   navigator.clipboard.writeText(buildScheduleText(slots))
-    .then(() => setMessage("已複製本週排班文字。"))
+    .then(() => setMessage("已複製目前畫面排班文字。"))
     .catch(() => setMessage("瀏覽器未允許複製，請手動選取表格內容。", true));
 }
 
 function onExportCsv() {
-  const slots = getWeekSlots();
+  const slots = getVisibleWeekSlots();
   if (!slots.length) {
-    setMessage("本週沒有排班可下載。", true);
+    setMessage("目前畫面沒有排班可下載。", true);
     return;
   }
-  const rows = [["日期", "星期", "時段", "組別", "人員"]].concat(slots.map(s => [s.date, dayName(s.date), s.hourText, s.groupName, s.personName]));
+  const rows = [["日期", "星期", "時段", "組別", "班別", "人員"]]
+    .concat(slots.map(s => [s.date, dayName(s.date), s.hourText, s.groupName, s.shiftText, s.personName]));
   const csv = rows.map(row => row.map(escapeCsv).join(",")).join("\n");
   const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
+  const dates = weekDates();
   link.href = url;
-  link.download = `當鋪週排班_${weekDates()[0]}_${weekDates()[5]}.csv`;
+  link.download = `當鋪週排班_${dates[0]}_${dates[5]}_${filterLabel()}.csv`;
   link.click();
   URL.revokeObjectURL(url);
   setMessage("已下載 CSV。");
@@ -300,7 +316,6 @@ function renderPeople() {
           <div class="person-meta">
             <span class="badge">${group.name}</span>
             <span>加入序：${person.joinOrder}</span>
-            <span>${group.start}～${group.end}</span>
           </div>
         </div>
         <div class="row-actions">
@@ -313,17 +328,25 @@ function renderPeople() {
 
 function renderSchedule() {
   const dates = weekDates();
-  app.els.weekLabel.textContent = `${dates[0].replaceAll("-", "/")} - ${dates[5].replaceAll("-", "/")}（週一至週六）`;
+  const weekStart = dates[0];
+  const rotationText = GROUPS.map(g => {
+    const shift = shiftForGroup(g.id, weekStart);
+    return `${g.name}${shift.name}${shift.start}～${shift.end}`;
+  }).join("，");
+  app.els.weekLabel.textContent = `${dates[0].replaceAll("-", "/")} - ${dates[5].replaceAll("-", "/")}（週一至週六）｜${rotationText}`;
+
   const hasAny = dates.some(date => app.data.schedules[date] && app.data.schedules[date].length);
   if (!hasAny) {
     app.els.scheduleTable.innerHTML = `<div class="empty-box">本週尚未產生排班。</div>`;
     return;
   }
 
+  const rows = visibleHours(weekStart);
   const header = dates.map((date, index) => `<th><div class="day-head"><strong>${shortDate(date)}</strong><span>${DAYS[index]}</span></div></th>`).join("");
-  const body = ALL_HOURS.map(hour => {
+  const body = rows.map(hour => {
+    const hourText = `${hour}～${addOneHour(hour)}`;
     const cells = dates.map(date => renderCell(date, hour)).join("");
-    return `<tr><td>${hour}</td>${cells}</tr>`;
+    return `<tr><td>${hourText}</td>${cells}</tr>`;
   }).join("");
 
   app.els.scheduleTable.innerHTML = `
@@ -331,7 +354,7 @@ function renderSchedule() {
       <thead><tr><th>成員 / 時段</th>${header}</tr></thead>
       <tbody>${body}</tbody>
     </table>
-    <div class="schedule-note">目前查看：${filterLabel()}。只顯示站班每小時輪流排班。</div>`;
+    <div class="schedule-note">目前查看：${filterLabel()}。${visibleNote(weekStart)}</div>`;
 }
 
 function renderCell(date, hour) {
@@ -339,19 +362,55 @@ function renderCell(date, hour) {
   if (!slot) return `<td><span class="cell-empty">—</span></td>`;
   const groupId = normalizeGroupId(slot.groupId);
   if (app.filterGroup !== "ALL" && groupId !== app.filterGroup) return `<td><span class="cell-empty">—</span></td>`;
-  return `<td><span class="cell-card group-${groupId}">${escapeHtml(slot.personName)}</span></td>`;
+  return `<td><span class="cell-card group-${groupId}">${escapeHtml(slot.personName)}<small>${slot.groupName} ${slot.shiftName || ""}</small></span></td>`;
 }
 
-function getWeekSlots() {
+function visibleHours(weekStart) {
+  if (app.filterGroup === "ALL") return ALL_HOURS;
+  return shiftForGroup(app.filterGroup, weekStart).hours;
+}
+
+function visibleNote(weekStart) {
+  if (app.filterGroup === "ALL") return "顯示早班、中班、晚班全部時段。";
+  const shift = shiftForGroup(app.filterGroup, weekStart);
+  return `${filterLabel()}本週只顯示${shift.name} ${shift.start}～${shift.end}。`;
+}
+
+function getVisibleWeekSlots() {
   const dates = weekDates();
-  return dates.flatMap(date => (app.data.schedules[date] || []).filter(slot => app.filterGroup === "ALL" || normalizeGroupId(slot.groupId) === app.filterGroup));
+  const allowedHours = new Set(visibleHours(dates[0]));
+  return dates.flatMap(date => (app.data.schedules[date] || []).filter(slot => {
+    const groupMatch = app.filterGroup === "ALL" || normalizeGroupId(slot.groupId) === app.filterGroup;
+    return groupMatch && allowedHours.has(slot.hour);
+  }));
 }
 
 function buildScheduleText(slots) {
   const dates = weekDates();
   return [`當鋪週排班 ${dates[0]}～${dates[5]} ${filterLabel()}`]
-    .concat(slots.map(s => `${s.date} ${dayName(s.date)} ${s.hourText} ${s.groupName}：${s.personName}`))
+    .concat(slots.map(s => `${s.date} ${dayName(s.date)} ${s.hourText} ${s.groupName} ${s.shiftName || ""}：${s.personName}`))
     .join("\n");
+}
+
+function shiftForGroup(groupId, weekStartDate) {
+  const groupIndex = GROUPS.findIndex(g => g.id === normalizeGroupId(groupId));
+  const rotationIndex = weekRotationIndex(weekStartDate);
+  return SHIFTS[(groupIndex + rotationIndex) % SHIFTS.length];
+}
+
+function weekRotationIndex(weekStartDate) {
+  ensureRotationBase();
+  const base = parseDate(app.data.rotationBaseMonday);
+  const target = mondayOf(parseDate(weekStartDate));
+  const diffDays = Math.round((target - base) / 86400000);
+  return mod(Math.floor(diffDays / 7), SHIFTS.length);
+}
+
+function ensureRotationBase() {
+  if (!app.data.rotationBaseMonday) {
+    app.data.rotationBaseMonday = nextWeekMondayText();
+    saveData();
+  }
 }
 
 function filterLabel() {
@@ -360,7 +419,11 @@ function filterLabel() {
 }
 
 function weekDates() {
-  const monday = mondayOf(parseDate(currentDate()));
+  return weekDatesFrom(mondayOf(parseDate(currentDate())));
+}
+
+function weekDatesFrom(mondayDateOrText) {
+  const monday = typeof mondayDateOrText === "string" ? parseDate(mondayDateOrText) : new Date(mondayDateOrText);
   return Array.from({ length: 6 }, (_, i) => {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
@@ -372,8 +435,15 @@ function currentDate() {
   return app.els.scheduleDate.value || todayText();
 }
 
+function nextWeekMondayText() {
+  const todayMonday = mondayOf(new Date());
+  todayMonday.setDate(todayMonday.getDate() + 7);
+  return formatDate(todayMonday);
+}
+
 function mondayOf(date) {
   const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
   const day = d.getDay();
   const diff = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);
@@ -424,6 +494,10 @@ function groupById(id) {
   return GROUPS.find(g => g.id === normalizeGroupId(id)) || GROUPS[0];
 }
 
+function mod(value, divisor) {
+  return ((value % divisor) + divisor) % divisor;
+}
+
 function setMessage(text, isError = false) {
   app.els.messageBox.textContent = text || "";
   app.els.messageBox.style.color = isError ? "#d92d20" : "#172554";
@@ -435,9 +509,9 @@ function saveData() {
 }
 
 function loadData() {
-  const fallback = { people: [], schedules: {} };
+  const fallback = { people: [], schedules: {}, rotationBaseMonday: "" };
   try {
-    const raw = localStorage.getItem(STORE_KEY) || localStorage.getItem(OLD_STORE_KEY);
+    const raw = localStorage.getItem(STORE_KEY) || OLD_STORE_KEYS.map(key => localStorage.getItem(key)).find(Boolean);
     if (!raw) return fallback;
     const parsed = JSON.parse(raw);
     const people = Array.isArray(parsed.people) ? parsed.people.map(p => ({ ...p, groupId: normalizeGroupId(p.groupId) })) : [];
@@ -446,9 +520,15 @@ function loadData() {
       if (Array.isArray(slots)) slots.forEach(slot => {
         slot.groupId = normalizeGroupId(slot.groupId);
         slot.groupName = groupById(slot.groupId).name;
+        if (!slot.shiftId) {
+          const shift = SHIFTS.find(s => s.hours.includes(slot.hour)) || SHIFTS[0];
+          slot.shiftId = shift.id;
+          slot.shiftName = shift.name;
+          slot.shiftText = `${shift.name} ${shift.start}～${shift.end}`;
+        }
       });
     });
-    return { people, schedules };
+    return { people, schedules, rotationBaseMonday: parsed.rotationBaseMonday || "" };
   } catch {
     return fallback;
   }
