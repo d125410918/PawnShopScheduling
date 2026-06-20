@@ -1,5 +1,5 @@
-const STORE_KEY = "pawnshop-scheduling-v3";
-const OLD_STORE_KEYS = ["pawnshop-scheduling-v2", "pawnshop-scheduling-v1"];
+const STORE_KEY = "pawnshop-scheduling-v4";
+const OLD_STORE_KEYS = ["pawnshop-scheduling-v3", "pawnshop-scheduling-v2", "pawnshop-scheduling-v1"];
 
 const GROUPS = [
   { id: "A", name: "A組" },
@@ -28,6 +28,7 @@ const app = {
   state: State.Idle,
   data: loadData(),
   filterGroup: "ALL",
+  peopleFilterGroup: "ALL",
   els: {},
   transition(nextState, payload) {
     exitState(this.state);
@@ -57,14 +58,17 @@ function init() {
     clearPeopleButton: document.getElementById("clearPeopleButton"),
     messageBox: document.getElementById("messageBox"),
     scheduleTable: document.getElementById("scheduleTable"),
-    filterButtons: [...document.querySelectorAll(".filter-btn")]
+    filterButtons: [...document.querySelectorAll(".filter-btn")],
+    peopleFilterButtons: [...document.querySelectorAll(".people-filter-btn")]
   };
 
-  app.els.scheduleDate.value = nextWeekMondayText();
+  app.els.scheduleDate.value = todayText();
   ensureRotationBase();
+  cleanupEndedWeeks();
+  setInterval(cleanupEndedWeeks, 60000);
 
   app.els.personForm.addEventListener("submit", onAddPerson);
-  app.els.generateButton.addEventListener("click", onGenerateNextWeekSchedule);
+  app.els.generateButton.addEventListener("click", onGenerateCurrentWeekSchedule);
   app.els.copyButton.addEventListener("click", onCopySchedule);
   app.els.exportButton.addEventListener("click", onExportCsv);
   app.els.clearScheduleButton.addEventListener("click", onClearWeekSchedule);
@@ -76,6 +80,10 @@ function init() {
   app.els.filterButtons.forEach(btn => btn.addEventListener("click", () => {
     app.filterGroup = btn.dataset.filter;
     app.transition(State.ViewingSchedule);
+  }));
+  app.els.peopleFilterButtons.forEach(btn => btn.addEventListener("click", () => {
+    app.peopleFilterGroup = btn.dataset.peopleFilter;
+    app.transition(State.ManagingPeople);
   }));
 
   app.transition(State.Idle);
@@ -107,80 +115,91 @@ function onAddPerson(event) {
     return;
   }
 
-  app.data.people.push({ id: cryptoId(), name, groupId, joinOrder: nextJoinOrder(), active: true });
+  app.data.people.push({
+    id: cryptoId(),
+    name,
+    groupId,
+    joinOrder: nextJoinOrder(),
+    rotationOrder: nextRotationOrder(groupId),
+    active: true
+  });
+  normalizePeopleOrders();
   app.els.personName.value = "";
   saveData();
   setMessage("已新增人員。");
   app.transition(State.Idle);
 }
 
-function onGenerateNextWeekSchedule() {
+function onGenerateCurrentWeekSchedule() {
   app.transition(State.GeneratingSchedule);
   try {
     ensureRotationBase();
-    const targetMonday = nextWeekMondayText();
-    app.els.scheduleDate.value = targetMonday;
-    weekDatesFrom(targetMonday).forEach(date => {
-      app.data.schedules[date] = generateDaySchedule(date, targetMonday);
+    normalizePeopleOrders();
+    const dates = weekDates();
+    const groupsToGenerate = app.filterGroup === "ALL" ? GROUPS.map(g => g.id) : [app.filterGroup];
+    const hasExisting = weekHasSchedules(dates, groupsToGenerate);
+    const targetText = app.filterGroup === "ALL" ? "本週已有班表，是否重新產生完整班表？" : `本週已有${filterLabel()}班表，是否只重新產生該組？`;
+    if (hasExisting && !confirm(targetText)) {
+      app.transition(State.ViewingSchedule);
+      return;
+    }
+
+    dates.forEach(date => {
+      const existing = Array.isArray(app.data.schedules[date]) ? app.data.schedules[date] : [];
+      const kept = existing.filter(slot => !groupsToGenerate.includes(normalizeGroupId(slot.groupId)));
+      const generated = groupsToGenerate.flatMap(groupId => generateGroupDaySchedule(date, dates[0], groupId));
+      app.data.schedules[date] = [...kept, ...generated].sort((a, b) => a.hour.localeCompare(b.hour));
     });
+
     saveData();
-    setMessage(`已完成下週排班：${targetMonday}～${weekDatesFrom(targetMonday)[5]}。`);
+    setMessage(app.filterGroup === "ALL" ? "已重新產生本週完整班表。" : `已重新產生本週${filterLabel()}班表。`);
     app.transition(State.ViewingSchedule);
   } catch (err) {
     app.transition(State.Error, err.message);
   }
 }
 
-function generateDaySchedule(date, weekStartDate) {
-  const slots = [];
-  for (const group of GROUPS) {
-    const shift = shiftForGroup(group.id, weekStartDate);
-    const members = app.data.people
-      .filter(p => normalizeGroupId(p.groupId) === group.id && p.active)
-      .sort((a, b) => b.joinOrder - a.joinOrder);
+function generateGroupDaySchedule(date, weekStartDate, groupId) {
+  const group = groupById(groupId);
+  const shift = shiftForGroup(group.id, weekStartDate);
+  const members = app.data.people
+    .filter(p => normalizeGroupId(p.groupId) === group.id && p.active)
+    .sort((a, b) => (a.rotationOrder || 0) - (b.rotationOrder || 0));
 
-    if (members.length === 0) throw new Error(`${group.name} 沒有啟用人員，無法排班。`);
+  if (members.length === 0) throw new Error(`${group.name} 沒有啟用人員，無法排班。`);
 
-    const used = new Set();
-    shift.hours.forEach((hour, index) => {
-      const pool = members.length >= shift.hours.length ? members.filter(p => !used.has(p.id)) : members.slice();
-      const selected = weightedPick(pool.length ? pool : members);
-      used.add(selected.id);
-      slots.push({
-        id: cryptoId(),
-        date,
-        hour,
-        hourText: `${hour}～${addOneHour(hour)}`,
-        groupId: group.id,
-        groupName: group.name,
-        shiftId: shift.id,
-        shiftName: shift.name,
-        shiftText: `${shift.name} ${shift.start}～${shift.end}`,
-        personId: selected.id,
-        personName: selected.name,
-        order: index + 1
-      });
-    });
-  }
-  return slots.sort((a, b) => a.hour.localeCompare(b.hour));
+  const ordered = shuffledRotation(members);
+  return shift.hours.map((hour, index) => {
+    const selected = ordered[index % ordered.length];
+    return {
+      id: cryptoId(),
+      date,
+      hour,
+      hourText: `${hour}～${addOneHour(hour)}`,
+      groupId: group.id,
+      groupName: group.name,
+      shiftId: shift.id,
+      shiftName: shift.name,
+      shiftText: `${shift.name} ${shift.start}～${shift.end}`,
+      personId: selected.id,
+      personName: selected.name,
+      order: index + 1,
+      randomSeed: Math.random()
+    };
+  });
 }
 
-function weightedPick(pool) {
-  const newest = [...pool].sort((a, b) => b.joinOrder - a.joinOrder).slice(0, 3).map(p => p.id);
-  const weightOf = person => {
-    const rank = newest.indexOf(person.id);
-    if (rank === 0) return 5;
-    if (rank === 1) return 4;
-    if (rank === 2) return 3;
-    return 1;
-  };
-  const total = pool.reduce((sum, person) => sum + weightOf(person), 0);
-  let roll = Math.random() * total;
-  for (const person of pool) {
-    roll -= weightOf(person);
-    if (roll <= 0) return person;
+function shuffledRotation(members) {
+  const copy = [...members];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
   }
-  return pool[pool.length - 1];
+  return copy;
+}
+
+function weekHasSchedules(dates, groupIds) {
+  return dates.some(date => (app.data.schedules[date] || []).some(slot => groupIds.includes(normalizeGroupId(slot.groupId))));
 }
 
 function onCopySchedule() {
@@ -216,14 +235,20 @@ function onExportCsv() {
 
 function onClearWeekSchedule() {
   const dates = weekDates();
-  const hasAny = dates.some(date => app.data.schedules[date]);
+  const groupsToClear = app.filterGroup === "ALL" ? GROUPS.map(g => g.id) : [app.filterGroup];
+  const hasAny = weekHasSchedules(dates, groupsToClear);
   if (!hasAny) {
-    setMessage("本週沒有排班。", true);
+    setMessage("本週沒有可清除的班表。", true);
     return;
   }
-  dates.forEach(date => delete app.data.schedules[date]);
+  if (!confirm(app.filterGroup === "ALL" ? "確定清除本週完整班表？" : `確定清除本週${filterLabel()}班表？`)) return;
+  dates.forEach(date => {
+    const existing = app.data.schedules[date] || [];
+    app.data.schedules[date] = existing.filter(slot => !groupsToClear.includes(normalizeGroupId(slot.groupId)));
+    if (app.data.schedules[date].length === 0) delete app.data.schedules[date];
+  });
   saveData();
-  setMessage("已清除本週排班。");
+  setMessage("已清除本週班表。");
   app.transition(State.Idle);
 }
 
@@ -239,8 +264,16 @@ function onSeedPeople() {
     D: ["建宏", "佩君", "冠宇", "怡萱"]
   };
   Object.entries(names).forEach(([groupId, list]) => {
-    list.forEach(name => app.data.people.push({ id: cryptoId(), name, groupId, joinOrder: nextJoinOrder(), active: true }));
+    list.forEach(name => app.data.people.push({
+      id: cryptoId(),
+      name,
+      groupId,
+      joinOrder: nextJoinOrder(),
+      rotationOrder: nextRotationOrder(groupId),
+      active: true
+    }));
   });
+  normalizePeopleOrders();
   saveData();
   setMessage("已建立範例人員。");
   app.transition(State.Idle);
@@ -271,11 +304,31 @@ function togglePerson(id) {
 function deletePerson(id) {
   const person = app.data.people.find(p => p.id === id);
   if (!person) return;
-  if (!confirm(`確定刪除 ${person.name}？既有排班文字會保留。`)) return;
+  if (!confirm(`確定刪除 ${person.name}？既有班表文字會保留。`)) return;
   app.data.people = app.data.people.filter(p => p.id !== id);
+  normalizePeopleOrders();
   saveData();
   setMessage("已刪除人員。");
   app.transition(State.Idle);
+}
+
+function movePerson(id, direction) {
+  normalizePeopleOrders();
+  const person = app.data.people.find(p => p.id === id);
+  if (!person) return;
+  const groupId = normalizeGroupId(person.groupId);
+  const groupPeople = app.data.people
+    .filter(p => normalizeGroupId(p.groupId) === groupId)
+    .sort((a, b) => a.rotationOrder - b.rotationOrder);
+  const index = groupPeople.findIndex(p => p.id === id);
+  const targetIndex = index + direction;
+  if (targetIndex < 0 || targetIndex >= groupPeople.length) return;
+  const target = groupPeople[targetIndex];
+  [person.rotationOrder, target.rotationOrder] = [target.rotationOrder, person.rotationOrder];
+  normalizePeopleOrders();
+  saveData();
+  setMessage("已調整輪調順序。重新產生班表後生效。");
+  app.transition(State.ManagingPeople);
 }
 
 function moveWeek(days) {
@@ -288,6 +341,7 @@ function moveWeek(days) {
 function render() {
   app.els.stateLabel.textContent = app.state;
   renderFilterButtons();
+  renderPeopleFilterButtons();
   renderPeople();
   renderSchedule();
 }
@@ -296,18 +350,27 @@ function renderFilterButtons() {
   app.els.filterButtons.forEach(btn => btn.classList.toggle("active", btn.dataset.filter === app.filterGroup));
 }
 
+function renderPeopleFilterButtons() {
+  app.els.peopleFilterButtons.forEach(btn => btn.classList.toggle("active", btn.dataset.peopleFilter === app.peopleFilterGroup));
+}
+
 function renderPeople() {
-  if (!app.data.people.length) {
-    app.els.peopleList.innerHTML = `<div class="empty-box">尚未新增人員。</div>`;
+  normalizePeopleOrders();
+  const filtered = app.data.people
+    .filter(p => app.peopleFilterGroup === "ALL" || normalizeGroupId(p.groupId) === app.peopleFilterGroup)
+    .sort((a, b) => {
+      const ga = normalizeGroupId(a.groupId);
+      const gb = normalizeGroupId(b.groupId);
+      if (ga !== gb) return ga.localeCompare(gb);
+      return (a.rotationOrder || 0) - (b.rotationOrder || 0);
+    });
+
+  if (!filtered.length) {
+    app.els.peopleList.innerHTML = `<div class="empty-box">目前篩選沒有可顯示的人員。</div>`;
     return;
   }
-  const sorted = [...app.data.people].sort((a, b) => {
-    const ga = normalizeGroupId(a.groupId);
-    const gb = normalizeGroupId(b.groupId);
-    if (ga !== gb) return ga.localeCompare(gb);
-    return b.joinOrder - a.joinOrder;
-  });
-  app.els.peopleList.innerHTML = sorted.map(person => {
+
+  app.els.peopleList.innerHTML = filtered.map(person => {
     const group = groupById(normalizeGroupId(person.groupId));
     return `
       <div class="person-row">
@@ -315,10 +378,13 @@ function renderPeople() {
           <div class="person-name">${escapeHtml(person.name)} ${person.active ? "" : "（停用）"}</div>
           <div class="person-meta">
             <span class="badge">${group.name}</span>
+            <span>輪調序：${person.rotationOrder}</span>
             <span>加入序：${person.joinOrder}</span>
           </div>
         </div>
         <div class="row-actions">
+          <button type="button" onclick="movePerson('${person.id}', -1)">上移</button>
+          <button type="button" onclick="movePerson('${person.id}', 1)">下移</button>
           <button type="button" onclick="togglePerson('${person.id}')">${person.active ? "停用" : "啟用"}</button>
           <button type="button" class="danger-text" onclick="deletePerson('${person.id}')">刪除</button>
         </div>
@@ -335,15 +401,8 @@ function renderSchedule() {
   }).join("，");
   app.els.weekLabel.textContent = `${dates[0].replaceAll("-", "/")} - ${dates[5].replaceAll("-", "/")}（週一至週六）｜${rotationText}`;
 
-  const hasAny = dates.some(date => app.data.schedules[date] && app.data.schedules[date].length);
-  if (!hasAny) {
-    app.els.scheduleTable.innerHTML = `<div class="empty-box">本週尚未產生排班。</div>`;
-    return;
-  }
-
-  const rows = visibleHours(weekStart);
   const header = dates.map((date, index) => `<th><div class="day-head"><strong>${shortDate(date)}</strong><span>${DAYS[index]}</span></div></th>`).join("");
-  const body = rows.map(hour => {
+  const body = ALL_HOURS.map(hour => {
     const hourText = `${hour}～${addOneHour(hour)}`;
     const cells = dates.map(date => renderCell(date, hour)).join("");
     return `<tr><td>${hourText}</td>${cells}</tr>`;
@@ -351,38 +410,28 @@ function renderSchedule() {
 
   app.els.scheduleTable.innerHTML = `
     <table class="week-table">
-      <thead><tr><th>成員 / 時段</th>${header}</tr></thead>
+      <thead><tr><th>時段</th>${header}</tr></thead>
       <tbody>${body}</tbody>
     </table>
     <div class="schedule-note">目前查看：${filterLabel()}。${visibleNote(weekStart)}</div>`;
 }
 
 function renderCell(date, hour) {
-  const slot = (app.data.schedules[date] || []).find(s => s.hour === hour);
+  const slot = (app.data.schedules[date] || []).find(s => s.hour === hour && (app.filterGroup === "ALL" || normalizeGroupId(s.groupId) === app.filterGroup));
   if (!slot) return `<td><span class="cell-empty">—</span></td>`;
   const groupId = normalizeGroupId(slot.groupId);
-  if (app.filterGroup !== "ALL" && groupId !== app.filterGroup) return `<td><span class="cell-empty">—</span></td>`;
   return `<td><span class="cell-card group-${groupId}">${escapeHtml(slot.personName)}<small>${slot.groupName} ${slot.shiftName || ""}</small></span></td>`;
 }
 
-function visibleHours(weekStart) {
-  if (app.filterGroup === "ALL") return ALL_HOURS;
-  return shiftForGroup(app.filterGroup, weekStart).hours;
-}
-
 function visibleNote(weekStart) {
-  if (app.filterGroup === "ALL") return "顯示早班、中班、晚班全部時段。";
+  if (app.filterGroup === "ALL") return "固定顯示 09:00～21:00 完整時段。";
   const shift = shiftForGroup(app.filterGroup, weekStart);
-  return `${filterLabel()}本週只顯示${shift.name} ${shift.start}～${shift.end}。`;
+  return `${filterLabel()}本週輪到${shift.name} ${shift.start}～${shift.end}，其他時段保留空白。`;
 }
 
 function getVisibleWeekSlots() {
   const dates = weekDates();
-  const allowedHours = new Set(visibleHours(dates[0]));
-  return dates.flatMap(date => (app.data.schedules[date] || []).filter(slot => {
-    const groupMatch = app.filterGroup === "ALL" || normalizeGroupId(slot.groupId) === app.filterGroup;
-    return groupMatch && allowedHours.has(slot.hour);
-  }));
+  return dates.flatMap(date => (app.data.schedules[date] || []).filter(slot => app.filterGroup === "ALL" || normalizeGroupId(slot.groupId) === app.filterGroup));
 }
 
 function buildScheduleText(slots) {
@@ -408,8 +457,25 @@ function weekRotationIndex(weekStartDate) {
 
 function ensureRotationBase() {
   if (!app.data.rotationBaseMonday) {
-    app.data.rotationBaseMonday = nextWeekMondayText();
+    app.data.rotationBaseMonday = mondayText(todayText());
     saveData();
+  }
+}
+
+function cleanupEndedWeeks() {
+  const currentMonday = mondayText(todayText());
+  let removed = false;
+  Object.keys(app.data.schedules).forEach(date => {
+    if (mondayText(date) < currentMonday) {
+      delete app.data.schedules[date];
+      removed = true;
+    }
+  });
+  if (removed) {
+    app.data.lastCleanupAt = new Date().toISOString();
+    saveData();
+    setMessage("已自動清除已結束週次的班表紀錄。");
+    renderSchedule();
   }
 }
 
@@ -435,10 +501,8 @@ function currentDate() {
   return app.els.scheduleDate.value || todayText();
 }
 
-function nextWeekMondayText() {
-  const todayMonday = mondayOf(new Date());
-  todayMonday.setDate(todayMonday.getDate() + 7);
-  return formatDate(todayMonday);
+function mondayText(dateText) {
+  return formatDate(mondayOf(parseDate(dateText)));
 }
 
 function mondayOf(date) {
@@ -486,6 +550,26 @@ function nextJoinOrder() {
   return app.data.people.reduce((max, p) => Math.max(max, p.joinOrder || 0), 0) + 1;
 }
 
+function nextRotationOrder(groupId) {
+  return app.data.people
+    .filter(p => normalizeGroupId(p.groupId) === normalizeGroupId(groupId))
+    .reduce((max, p) => Math.max(max, p.rotationOrder || 0), 0) + 1;
+}
+
+function normalizePeopleOrders() {
+  GROUPS.forEach(group => {
+    const groupPeople = app.data.people
+      .filter(p => normalizeGroupId(p.groupId) === group.id)
+      .sort((a, b) => (a.rotationOrder || a.joinOrder || 0) - (b.rotationOrder || b.joinOrder || 0));
+    groupPeople.forEach((person, index) => {
+      person.groupId = normalizeGroupId(person.groupId);
+      person.rotationOrder = index + 1;
+      if (!person.joinOrder) person.joinOrder = index + 1;
+      if (typeof person.active !== "boolean") person.active = true;
+    });
+  });
+}
+
 function normalizeGroupId(id) {
   return id === "C" ? "D" : id;
 }
@@ -509,12 +593,17 @@ function saveData() {
 }
 
 function loadData() {
-  const fallback = { people: [], schedules: {}, rotationBaseMonday: "" };
+  const fallback = { people: [], schedules: {}, rotationBaseMonday: "", lastCleanupAt: "" };
   try {
     const raw = localStorage.getItem(STORE_KEY) || OLD_STORE_KEYS.map(key => localStorage.getItem(key)).find(Boolean);
     if (!raw) return fallback;
     const parsed = JSON.parse(raw);
-    const people = Array.isArray(parsed.people) ? parsed.people.map(p => ({ ...p, groupId: normalizeGroupId(p.groupId) })) : [];
+    const people = Array.isArray(parsed.people) ? parsed.people.map(p => ({
+      ...p,
+      groupId: normalizeGroupId(p.groupId),
+      active: typeof p.active === "boolean" ? p.active : true,
+      rotationOrder: p.rotationOrder || p.joinOrder || 1
+    })) : [];
     const schedules = parsed.schedules && typeof parsed.schedules === "object" ? parsed.schedules : {};
     Object.values(schedules).forEach(slots => {
       if (Array.isArray(slots)) slots.forEach(slot => {
@@ -528,7 +617,12 @@ function loadData() {
         }
       });
     });
-    return { people, schedules, rotationBaseMonday: parsed.rotationBaseMonday || "" };
+    return {
+      people,
+      schedules,
+      rotationBaseMonday: parsed.rotationBaseMonday || "",
+      lastCleanupAt: parsed.lastCleanupAt || ""
+    };
   } catch {
     return fallback;
   }
