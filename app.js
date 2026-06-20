@@ -23,6 +23,7 @@ const app = {
 document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
+  simplifyHeader();
   injectBranchPanel();
   app.els = {
     stateLabel: document.getElementById("stateLabel"), personForm: document.getElementById("personForm"), personName: document.getElementById("personName"), peopleList: document.getElementById("peopleList"),
@@ -36,6 +37,11 @@ async function init() {
   bindEvents();
   await loadCloudData();
   app.transition(State.Idle);
+}
+
+function simplifyHeader() {
+  const heroText = document.querySelector(".hero > div:first-child");
+  if (heroText) heroText.innerHTML = `<h1>排班表</h1>`;
 }
 
 function injectBranchPanel() {
@@ -137,10 +143,22 @@ async function togglePerson(id) { const p = app.data.people.find(x => x.id === i
 async function deletePerson(id) { if (!confirm("確定刪除此人員？")) return; await api(`/api/people?branch=${app.branchCode}`, { method: "DELETE", body: JSON.stringify({ id }) }); app.data.people = app.data.people.filter(p => p.id !== id); app.transition(State.Idle); }
 async function onClearWeekSchedule() { const dates = weekDates(); const groups = app.filterGroup === "ALL" ? GROUPS.map(g => g.id) : [app.filterGroup]; if (!weekHasSchedules(dates, groups)) return setMessage("本週沒有可清除的班表。", true); if (!confirm("確定清除目前範圍班表？")) return; await api(`/api/schedules?branch=${app.branchCode}`, { method: "DELETE", body: JSON.stringify({ dates, groups }) }); dates.forEach(date => { app.data.schedules[date] = (app.data.schedules[date] || []).filter(slot => !groups.includes(normalizeGroupId(slot.groupId))); }); app.transition(State.Idle); }
 async function onSlotPersonChange(slotId, personId) { const found = findSlotById(slotId); if (!found) return; const person = app.data.people.find(p => p.id === personId); if (!person) return; found.slot.personId = person.id; found.slot.personName = person.name; await api(`/api/schedules?branch=${app.branchCode}`, { method: "PATCH", body: JSON.stringify({ slotId, personId: person.id, personName: person.name }) }); app.transition(State.ViewingSchedule); }
-async function onCreateBranch() { const branchName = app.els.branchNameInput.value.trim(); if (!branchName) return setMessage("請輸入分店名稱。", true); const json = await api('/api/branches', { method: "POST", body: JSON.stringify({ branchName }) }); location.href = branchUrl(json.branch.branch_code); }
+async function onCreateBranch() { if (app.branchCode !== "main") return setMessage("分店頁面不能新增或查看其他分店。", true); const branchName = app.els.branchNameInput.value.trim(); if (!branchName) return setMessage("請輸入分店名稱。", true); const json = await api('/api/branches', { method: "POST", body: JSON.stringify({ branchName }) }); location.href = branchUrl(json.branch.branch_code); }
 
 function render() { app.els.stateLabel.textContent = app.state; renderBranch(); renderFilterButtons(); renderPeopleFilterButtons(); renderRotationLabel(); renderPeople(); renderSchedule(); }
-function renderBranch() { app.els.currentBranchName.textContent = app.branch?.branch_name || "主店"; app.els.currentBranchCode.textContent = ` ${app.branchCode}`; app.els.branchList.innerHTML = app.branches.map(b => `<button type="button" onclick="location.href='${branchUrl(b.branch_code)}'">${escapeHtml(b.branch_name)}</button><button type="button" onclick="copyText('${branchUrl(b.branch_code)}','已複製分店連結。')">複製</button>`).join(" "); }
+function renderBranch() {
+  app.els.currentBranchName.textContent = app.branch?.branch_name || "主店";
+  app.els.currentBranchCode.textContent = ` ${app.branchCode}`;
+  if (app.branchCode !== "main") {
+    app.els.branchNameInput.style.display = "none";
+    app.els.createBranchButton.style.display = "none";
+    app.els.branchList.innerHTML = "";
+    return;
+  }
+  app.els.branchNameInput.style.display = "block";
+  app.els.createBranchButton.style.display = "inline-block";
+  app.els.branchList.innerHTML = app.branches.map(b => `<button type="button" onclick="location.href='${branchUrl(b.branch_code)}'">${escapeHtml(b.branch_name)}</button><button type="button" onclick="copyText('${branchUrl(b.branch_code)}','已複製分店連結。')">複製</button>`).join(" ");
+}
 function renderFilterButtons() { app.els.filterButtons.forEach(btn => btn.classList.toggle("active", btn.dataset.filter === app.filterGroup)); }
 function renderPeopleFilterButtons() { app.els.peopleFilterButtons.forEach(btn => btn.classList.toggle("active", btn.dataset.peopleFilter === app.peopleFilterGroup)); }
 function renderRotationLabel() { app.els.rotationLabel.textContent = rotationOrderText(); }
