@@ -11,8 +11,8 @@
     <header class="hero">
       <div>
         <p class="eyebrow">Pawn Shop Scheduling</p>
-        <h1>當鋪排班表</h1>
-        <p class="subtext">每天獨立隨機排班，每人一小時，12 小時分三組，優先安排最新加入人員。</p>
+        <h1>排班表</h1>
+        <p class="subtext">週一到週六，每天獨立隨機排班；每人一小時，12 小時分 A、B、D 三組。</p>
       </div>
       <div class="hero-card">
         <span>目前狀態</span>
@@ -25,7 +25,7 @@
         <div class="panel-title-row">
           <div>
             <h2>人員管理</h2>
-            <p>新增人員時請指定組別；下方清單可停用或刪除人員。</p>
+            <p>新增人員時請指定組別；清單可停用、啟用或刪除。</p>
           </div>
         </div>
 
@@ -39,7 +39,7 @@
             <legend>所屬組別</legend>
             <label><input type="radio" name="group" value="A" checked /> A組 09:00～13:00</label>
             <label><input type="radio" name="group" value="B" /> B組 13:00～17:00</label>
-            <label><input type="radio" name="group" value="C" /> C組 17:00～21:00</label>
+            <label><input type="radio" name="group" value="D" /> D組 17:00～21:00</label>
           </fieldset>
 
           <button type="submit" class="primary-btn">新增人員</button>
@@ -56,8 +56,8 @@
       <section class="panel schedule-panel">
         <div class="panel-title-row">
           <div>
-            <h2>每日排班</h2>
-            <p>每一天都獨立產生，不沿用前一天結果。</p>
+            <h2>週排班</h2>
+            <p id="weekLabel">選擇任一天，系統會顯示該週週一到週六。</p>
           </div>
           <label class="date-box">
             日期
@@ -66,15 +66,24 @@
         </div>
 
         <div class="rules-card">
-          <strong>排班規則</strong>
-          <p>每組各排 4 小時；每個時段只抽該組啟用人員。最新加入前 3 名會提高抽中權重。組內人數足夠時，同一天盡量不重複。</p>
+          <strong>站班（每小時輪流）</strong>
+          <p>每個時段只從該組啟用人員中抽選。最新加入前 3 名人員有較高權重。組內人員足夠時，同一天盡量不重複。</p>
         </div>
 
         <div class="schedule-actions">
-          <button id="generateButton" type="button" class="primary-btn">產生排班</button>
+          <button id="prevWeekButton" type="button">上一週</button>
+          <button id="nextWeekButton" type="button">下一週</button>
+          <button id="generateButton" type="button" class="primary-btn">產生本週排班</button>
           <button id="copyButton" type="button">複製文字</button>
           <button id="exportButton" type="button">下載 CSV</button>
-          <button id="clearScheduleButton" type="button" class="danger-text">清除當日排班</button>
+          <button id="clearScheduleButton" type="button" class="danger-text">清除本週排班</button>
+        </div>
+
+        <div class="filter-bar" aria-label="組別篩選">
+          <button type="button" class="filter-btn active" data-filter="ALL">所有人</button>
+          <button type="button" class="filter-btn" data-filter="A">A組</button>
+          <button type="button" class="filter-btn" data-filter="B">B組</button>
+          <button type="button" class="filter-btn" data-filter="D">D組</button>
         </div>
 
         <div id="messageBox" class="message-box" role="status"></div>
